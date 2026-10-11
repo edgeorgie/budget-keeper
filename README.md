@@ -132,7 +132,8 @@ npm run dashboard
 ```
 
 Optional: `GITHUB_TOKEN` (or `--token-file`) raises the API rate limit from 60/hr;
-`ANTHROPIC_API_KEY` switches to real inference.
+`ANTHROPIC_API_KEY` switches to real inference. Nothing is reported anywhere unless you opt
+in to [telemetry](#telemetry-opt-in-off-by-default).
 
 Real output from an actual run (`request/request`, $0.08 ceiling, 40 dependencies scanned):
 
@@ -156,7 +157,7 @@ half-funded run returns the half that matters.
 
 ## What is verified, and how
 
-`npm test` runs 73 tests. The load-bearing ones are properties, not examples:
+`npm test` runs 152 tests. The load-bearing ones are properties, not examples:
 
 - **The ceiling holds across 200 randomised run shapes** — budgets spanning four orders of
   magnitude, three tiers, 1–8 steps, chunk sizes 1–200 chars. Seeded PRNG, so a failure is
@@ -173,6 +174,13 @@ half-funded run returns the half that matters.
 - **The dashboard** is exercised over real HTTP on an ephemeral port, including the trap that
   the report is emitted *after* `run-end` (closing the stream on `run-end` silently discards
   it — a bug this project shipped and then pinned with a test).
+- **Telemetry is off unless asked for, and cannot hurt a run when on.** The real CLI is run as
+  a child process against a local HTTP server standing in for PostHog: with the variables unset
+  (or only one of them set) the server sees nothing; with both set it sees exactly one
+  allowlisted request, and stdout, stderr (run ids aside) and the exit code are identical to
+  the run without it; against a host that never answers, exit is held for the 2 s timeout and no
+  longer. A planted task text, file path and API key appear in no payload. See
+  [Telemetry](#telemetry-opt-in-off-by-default).
 
 **The guards were mutation-tested, not assumed.** Each load-bearing mechanism was deleted and
 the suite re-run to confirm the tests actually fail:
@@ -227,6 +235,81 @@ claims to test.
 
 ---
 
+## Telemetry (opt-in, off by default)
+
+**Status: implemented, not verified end to end.** The tests exercise it against a stubbed
+`fetch` and a local HTTP server standing in for PostHog. No live PostHog project has received an
+event from this code, and the request shape follows PostHog's published capture API reference
+rather than an observed ingest.
+
+The CLI sends **nothing** unless you set both of these:
+
+```bash
+BUDGET_KEEPER_TELEMETRY=1 POSTHOG_KEY=<your PostHog project token> \
+  npm run keeper -- --repo request/request --budget 0.08
+```
+
+There is no token built in, so a checkout, a fork or a fresh install reports nowhere. With
+either variable missing (or `BUDGET_KEEPER_TELEMETRY` set to anything but exactly `1`), nothing
+is requested, written or printed. **To turn it off, unset the variable.** Nothing is stored on
+disk, so there is nothing else to clean up.
+
+### What is sent
+
+One request when a run ends, `POST {host}/i/v0/e/` with this body:
+
+| Field | Value |
+|---|---|
+| `event` | `run_completed` |
+| `api_key` | the project token you supplied in `POSTHOG_KEY` |
+| `distinct_id` | a fresh random UUID per run. Not derived from the machine or the person; nothing links two runs. |
+| `properties.app`, `properties.surface` | the constants `budget-keeper` and `cli` |
+| `properties.budget_bucket` | the USD budget as a bucket: `<0.05`, `0.05-0.25`, `0.25-1`, `1-10` or `10+` (lower edge inclusive; the CLI default of 0.05 is in `0.05-0.25`) |
+| `properties.spent_pct` | whole percent of the budget spent, rounded. Above 100 only if a provider overran its allowance. |
+| `properties.tier_switches` | how many times a step ran on a different model tier than the step before it |
+| `properties.killed` | `true` if the mid-stream kill-switch ended the run |
+| `properties.outcome` | why the run stopped: one of `completed`, `budget-preflight`, `budget-exhausted`, `budget-killswitch`, `caller-abort`, `error` (the closed `StopReason` list in `src/types.ts`) |
+| `properties.$process_person_profile` | `false`: PostHog stores the event without a person profile |
+| `properties.$geoip_disable` | `true`: PostHog is asked not to derive a location from the sender's IP |
+
+### What is never sent
+
+The repository you scanned, its dependencies or advisories; the prompts, the model's output or
+the report; model names; file paths (including `--out` and `--token-file`); command-line
+arguments; environment variables (the CLI reads the three below and nothing else for this);
+`ANTHROPIC_API_KEY`, `GITHUB_TOKEN` or any other credential; your hostname or username; exact
+budget or spend amounts; step names or how many steps ran. A run that never
+starts (a usage error, a failed scan) sends nothing, because no run ended, and neither does
+interrupting with Ctrl-C.
+
+PostHog necessarily sees the IP address a request comes from, as any server does. Turn on
+**Discard client IP data** in the PostHog project's settings so it is not stored; PostHog's
+documentation names that project setting as the way to drop it.
+
+### How it works, and its limits
+
+- Plain `fetch` to PostHog's capture endpoint. No SDK and no new dependency: `semver` is still
+  the only runtime dependency; `src/telemetry.ts` holds the implementation and `src/cli.ts`
+  makes the one call.
+- The request is cut off after **2 seconds**, so telemetry can delay the CLI's exit by at most
+  that. Every failure (offline, DNS, timeout, a non-2xx reply) is ignored: no output, no change
+  to the exit code, no retry.
+- The payload is assembled field by field from an allowlist, from a run's stop reason, budget,
+  spend and the tier of each step. Step text, names and models are never read.
+
+| Variable | Meaning |
+|---|---|
+| `BUDGET_KEEPER_TELEMETRY` | must be exactly `1` to opt in |
+| `POSTHOG_KEY` | the PostHog **project token** (`phc_...`). A personal API key (`phx_...`) or project secret key (`phs_...`) is refused, not sent. With a token of your own, events go to your own project. |
+| `POSTHOG_HOST` | optional ingestion host, an `http(s)` URL; default `https://us.i.posthog.com`. An unusable value turns telemetry off. Point it at a local listener to see exactly what would be sent. |
+
+The local dashboard (`npm run dashboard`) is **not instrumented**. It never imports the
+telemetry module and sends nothing even with these variables set; a test fails if that changes.
+The design decisions and open questions are in
+[`docs/adr/0001-opt-in-cli-telemetry.md`](docs/adr/0001-opt-in-cli-telemetry.md).
+
+---
+
 ## Layout
 
 ```
@@ -242,8 +325,9 @@ src/
   task/
     cve-scan.ts         GitHub contents + advisories → prioritised exposures
     patch-plan.ts       exposures → governed steps → markdown report
-  dashboard/            SSE server + dependency-free live page
-tests/                  73 tests
+  telemetry.ts          opt-in, anonymous run_completed event (off unless enabled)
+  dashboard/            SSE server + dependency-free live page (no telemetry)
+tests/                  152 tests
 ```
 
 ## License
