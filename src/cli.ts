@@ -4,6 +4,7 @@ import { makeFetcher, resolveGithubToken } from "./net.ts";
 import { resolveModels } from "./resolve.ts";
 import { scanRepo } from "./task/cve-scan.ts";
 import { buildSteps, initialState, renderReport } from "./task/patch-plan.ts";
+import { reportRunCompleted } from "./telemetry.ts";
 import type { GovernorEvent } from "./types.ts";
 
 interface Args {
@@ -49,6 +50,10 @@ function parseArgs(argv: readonly string[]): Args {
         "Credentials (both optional):",
         "  GITHUB_TOKEN       raises the GitHub API rate limit (60/hr unauthenticated)",
         "  ANTHROPIC_API_KEY  switches from the deterministic simulator to real inference",
+        "",
+        "Telemetry (off by default; see README \"Telemetry\"):",
+        "  BUDGET_KEEPER_TELEMETRY=1 with POSTHOG_KEY set sends one anonymous run_completed",
+        "  event when a run ends: buckets and counts only, never content. Unset to turn off.",
         "",
       ].join("\n"),
     );
@@ -124,18 +129,29 @@ async function main(): Promise<void> {
     },
   });
 
-  const report = renderReport(result.partial, {
-    reason: result.reason,
-    spentUsd: result.spend.usd,
-    budgetUsd: result.budgetUsd,
-    skipped: result.skipped,
-  });
+  // Opt-in, anonymous, shape-only telemetry (README "Telemetry"). A complete no-op
+  // unless BUDGET_KEEPER_TELEMETRY=1 and POSTHOG_KEY are both set. Started here so the
+  // request overlaps with rendering the report, and awaited in `finally` so a failure
+  // while writing the report cannot skip it. It never rejects and is bounded by its own
+  // timeout, so it cannot change the exit code or delay exit by more than that.
+  const telemetry = reportRunCompleted(result, process.env);
 
-  if (args.out) {
-    writeFileSync(args.out, report, "utf8");
-    process.stderr.write(`report written to ${args.out}\n`);
-  } else if (!args.json) {
-    process.stdout.write(`\n${report}`);
+  try {
+    const report = renderReport(result.partial, {
+      reason: result.reason,
+      spentUsd: result.spend.usd,
+      budgetUsd: result.budgetUsd,
+      skipped: result.skipped,
+    });
+
+    if (args.out) {
+      writeFileSync(args.out, report, "utf8");
+      process.stderr.write(`report written to ${args.out}\n`);
+    } else if (!args.json) {
+      process.stdout.write(`\n${report}`);
+    }
+  } finally {
+    await telemetry;
   }
 
   // A budget stop is the governor working, not an error: exit 0. Only a genuine
