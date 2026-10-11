@@ -1,0 +1,27 @@
+{
+  "name": "budget-keeper",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cost-governed multi-step agent: hard per-run USD budget enforced mid-stream at the token level, automatic model-tier routing, and a kill-switch with clean partial-result handoff.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "lint": "tsc --noEmit",
+    "keeper": "node --experimental-strip-types src/cli.ts",
+    "dashboard": "node --experimental-strip-types src/dashboard/server.ts"
+  },
+  "dependencies": {
+    "semver": "^7.6.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/semver": "^7.5.8",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

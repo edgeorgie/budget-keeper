@@ -1,0 +1,48 @@
+name: verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      # Typecheck, test and build are separate steps so a red run names which
+      # gate failed rather than collapsing into one opaque "npm run ci" failure.
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      # The tests must not reach the network or spend money. Running the suite
+      # with the credentials explicitly stripped proves the governor's properties
+      # are verified against the deterministic simulator and cannot silently
+      # start billing a real provider in CI.
+      - name: Test with credentials stripped
+        env:
+          ANTHROPIC_API_KEY: ""
+          GITHUB_TOKEN: ""
+        run: npm test
+
+      # The CLI must work end to end with no credentials at all. `--help` exits 2
+      # by design, so this asserts the real scan path against the live GitHub API
+      # instead, with the run's own budget gate as the cost ceiling.
+      - name: Smoke-test the CLI against a real repository
+        run: node --experimental-strip-types src/cli.ts --repo expressjs/express --budget 0.01
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
