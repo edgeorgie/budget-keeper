@@ -18,6 +18,24 @@ jobs:
 
       - run: npm ci
 
+      # Audited at FULL tree scope, not the `--omit=dev` scope the sibling repos
+      # use. That difference is deliberate and was measured, not assumed: on the
+      # tree this step was added to fix, `npm audit --omit=dev --audit-level=high`
+      # exited 0 while two CRITICAL advisories (GHSA-5gmw-xhrv-c9v3 and
+      # GHSA-85c8-ppgw-ccpr, prototype-pollution-to-RCE in `tinypool`) were live
+      # in the dev tree. A dev-only advisory still runs on a maintainer's machine
+      # and in this very workflow, so scoping them out would have made the gate
+      # pass vacuously on exactly the finding it exists to catch.
+      #
+      # Viable at full scope here because this project's whole tree is 41 packages
+      # with 0 findings; the sibling repos carry dev subtrees with unfixable-without
+      # -major-downgrade advisories, which is why they narrow instead. If a future
+      # advisory lands with no patched version available, the path to green is a
+      # Dependabot PR (now enabled, see .github/dependabot.yml) or narrowing this
+      # step with the reason recorded — not deleting it.
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+
       # Typecheck, test and build are separate steps so a red run names which
       # gate failed rather than collapsing into one opaque "npm run ci" failure.
       - name: Typecheck
