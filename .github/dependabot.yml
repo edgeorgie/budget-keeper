@@ -7,6 +7,28 @@ updates:
     groups:
       minor-and-patch:
         update-types: [minor, patch]
+
+    # Two majors are held back deliberately, not by neglect. `eslint-config-next`
+    # bundles its own `typescript-eslint`, and that copy hard-refuses both of
+    # them — observed in CI, not assumed:
+    #
+    #   typescript@7.x  -> "typescript-eslint does not support TS 7.0"
+    #                      (eslint-config-next/node_modules/typescript-eslint)
+    #   eslint@10.x     -> TypeError: Error while loading rule
+    #                      'react/display-name': contextOrFilename.getFilename
+    #                      is not a function
+    #
+    # Both fail the `lint` step of this repo's own `verify` script, so the bump
+    # cannot merge while that dependency is in the tree. Tracking upstream:
+    # https://github.com/typescript-eslint/typescript-eslint/issues/10940
+    # Remove these two ignores once `eslint-config-next` ships a copy that
+    # supports them; nothing else is pinned here.
+    ignore:
+      - dependency-name: typescript
+        versions: [">=7"]
+      - dependency-name: eslint
+        versions: [">=10"]
+
   - package-ecosystem: github-actions
     directory: /
     schedule:
