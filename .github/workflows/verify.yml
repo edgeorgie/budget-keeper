@@ -18,21 +18,20 @@ jobs:
 
       - run: npm ci
 
-      # Audited at FULL tree scope, not the `--omit=dev` scope the sibling repos
-      # use. That difference is deliberate and was measured, not assumed: on the
-      # tree this step was added to fix, `npm audit --omit=dev --audit-level=high`
-      # exited 0 while two CRITICAL advisories (GHSA-5gmw-xhrv-c9v3 and
-      # GHSA-85c8-ppgw-ccpr, prototype-pollution-to-RCE in `tinypool`) were live
-      # in the dev tree. A dev-only advisory still runs on a maintainer's machine
-      # and in this very workflow, so scoping them out would have made the gate
-      # pass vacuously on exactly the finding it exists to catch.
+      # Scope is the FULL tree, not the `--omit=dev` scope the siblings use. On the
+      # tree this fixed, `--omit=dev --audit-level=high` exited 0 while three
+      # critical advisories were live in the dev tree (GHSA-5gmw-xhrv-c9v3,
+      # GHSA-85c8-ppgw-ccpr, GHSA-5xrq-8626-4rwp — npm's summary says "2 critical"
+      # because it counts packages, not advisories). Dev code runs here and on
+      # maintainer machines. Affordable at 41 packages; siblings narrow because
+      # their dev subtrees are larger.
       #
-      # Viable at full scope here because this project's whole tree is 41 packages
-      # with 0 findings; the sibling repos carry dev subtrees with unfixable-without
-      # -major-downgrade advisories, which is why they narrow instead. If a future
-      # advisory lands with no patched version available, the path to green is a
-      # Dependabot PR (now enabled, see .github/dependabot.yml) or narrowing this
-      # step with the reason recorded — not deleting it.
+      # Moderate findings do not block (measured: moderate-only tree exits 0 here,
+      # 1 at `--audit-level=moderate`); they ride the weekly Dependabot PR.
+      #
+      # If an advisory has no patched version, Dependabot has no bump to offer and
+      # `npm audit` has no allowlist flag: drop the dependency, or add `--omit=dev`
+      # here with the GHSA and reason (verified to green a dev-scoped unpatchable).
       - name: Audit dependencies
         run: npm audit --audit-level=high
 
