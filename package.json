@@ -16,12 +16,12 @@
     "dashboard": "node --experimental-strip-types src/dashboard/server.ts"
   },
   "dependencies": {
-    "semver": "^7.6.3"
+    "semver": "^7.8.6"
   },
   "devDependencies": {
-    "@types/node": "^26.6.4",
+    "@types/node": "^26.6.6",
     "@types/semver": "^7.5.8",
     "typescript": "^6.0.3",
-    "vitest": "5.0.3"
+    "vitest": "5.1.0"
   }
 }
